@@ -10,26 +10,19 @@
 #define BUFFER_SIZE 1024
 
 int main() {
-    // Disable output buffering
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
 
-    // You can use print statements as follows for debugging, they'll be visible
-    // when running tests. printf("Logs from your program will appear here!\n");
     int server_fd;
     socklen_t client_addr_len;
     struct sockaddr_in client_addr;
 
-    // Creates a TCP socket (SOCK_STREAM) using IPv4 addressing (AF_INET) with
-    // default protocol (0)
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
         printf("Socket creation failed: %s...\n", strerror(errno));
         return 1;
     }
 
-    // Since the tester restarts your program quite often, setting SO_REUSEADDR
-    // ensures that we don't run into 'Address already in use' errors
     int reuse = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) <
         0) {
@@ -37,26 +30,19 @@ int main() {
         return 1;
     }
 
-    // holds the settings of a server address, uses IPv4 (AF_INET),
-    // converts the port 4221 to network byte order (standard way in data is
-    // formatted when sent through a network)
-    // binds to all available network interfaces htonl(INADDR_ANY)
     struct sockaddr_in serv_addr = {
         .sin_family = AF_INET,
         .sin_port = htons(4221),
         .sin_addr = {htonl(INADDR_ANY)},
     };
 
-    // Assigns address to the socket
     if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) !=
         0) {
         printf("Bind failed: %s \n", strerror(errno));
         return 1;
     }
 
-    // maximum number of connections listened
     int connection_backlog = 5;
-    // Starts listenning for connections
     if (listen(server_fd, connection_backlog) != 0) {
         printf("Listen failed: %s \n", strerror(errno));
         return 1;
@@ -74,52 +60,39 @@ int main() {
     printf("Client connected\n");
 
     char buffer[BUFFER_SIZE] = {0};
-    // signed size type to get bytes
-    // recv reads the client's HTTP request
     ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received <= 0) {
         printf("Failed to receive request\n");
         close(client_fd);
     }
 
-    char method[BUFFER_SIZE], path[BUFFER_SIZE], protocol[BUFFER_SIZE];
-    // string scanf reads formatted data and sets extracted values to variables
-    sscanf(buffer, "%s %s %s", method, path, protocol);
-    // Null-terminate the path before using it
-    path[BUFFER_SIZE - 1] = '\n';
-    printf("Request path: %s\n", path);
-
-    // Add this immediately after `recv()` to prevent corrupted strings
     buffer[bytes_received] = '\0';
 
+    char method[BUFFER_SIZE], path[BUFFER_SIZE], protocol[BUFFER_SIZE];
+    sscanf(buffer, "%s %s %s", method, path, protocol);
+    path[BUFFER_SIZE - 1] = '\0';
+    printf("Request path: %s\n", path);
+
     char response[BUFFER_SIZE];
-    if (strncmp(path, "/echo/", 6) == 0) {
+    if (strcmp(path, "/") == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: 2\r\n"
+                 "\r\n"
+                 "OK");
+        send(client_fd, response, strlen(response), 0);
+    } else if (strncmp(path, "/echo/", 6) == 0) {
         const char *echo_str = path + 6;
-
-        // Ensure echo_str doesn't exceed buffer limits
-        if (strlen(echo_str) >= BUFFER_SIZE - 100) {
-            printf("Error: String too large to handle safely\n");
-            close(client_fd);
-            close(server_fd);
-            return 1;
-        }
-
-        char response[BUFFER_SIZE];
-        memset(response, 0, sizeof(response)); // Clear buffer before writing
-
         int content_length = strlen(echo_str);
-
-        // snprintf formats a string and stores the result in a buffer,
-        // ensuring that the buffer is not overflowed.
-        int response_length = snprintf(response, sizeof(response),
-                                       "HTTP/1.1 200 OK\r\n"
-                                       "Content-Type: text/plain\r\n"
-                                       "Content-Length: %d\r\n"
-                                       "\r\n"
-                                       "%s",
-                                       content_length, echo_str);
-
-        send(client_fd, response, response_length, 0);
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: %d\r\n"
+                 "\r\n"
+                 "%s",
+                 content_length, echo_str);
+        send(client_fd, response, strlen(response), 0);
     } else {
         const char *response = "HTTP/1.1 404 Not Found\r\n"
                                "Content-Type: text/plain\r\n"
@@ -129,7 +102,7 @@ int main() {
         send(client_fd, response, strlen(response), 0);
     }
 
-    shutdown(client_fd, SHUT_WR); 
+    shutdown(client_fd, SHUT_WR);
     close(server_fd);
 
     return 0;
