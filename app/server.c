@@ -16,7 +16,8 @@ int main() {
 
     // You can use print statements as follows for debugging, they'll be visible
     // when running tests. printf("Logs from your program will appear here!\n");
-    int server_fd, client_addr_len;
+    int server_fd;
+    socklen_t client_addr_len;
     struct sockaddr_in client_addr;
 
     // Creates a TCP socket (SOCK_STREAM) using IPv4 addressing (AF_INET) with
@@ -84,27 +85,51 @@ int main() {
     char method[BUFFER_SIZE], path[BUFFER_SIZE], protocol[BUFFER_SIZE];
     // string scanf reads formatted data and sets extracted values to variables
     sscanf(buffer, "%s %s %s", method, path, protocol);
-
+    // Null-terminate the path before using it
+    path[BUFFER_SIZE - 1] = '\n';
     printf("Request path: %s\n", path);
 
-    const char *response;
-    if (strcmp(path, "/") == 0) {
-        response = "HTTP/1.1 200 OK\r\n"
-                   "Content-Type: text/plain\r\n"
-                   "Content-Length: 14\r\n"
-                   "\r\n"
-                   "Hello, World!\n";
+    // Add this immediately after `recv()` to prevent corrupted strings
+    buffer[bytes_received] = '\0';
+
+    char response[BUFFER_SIZE];
+    if (strncmp(path, "/echo/", 6) == 0) {
+        const char *echo_str = path + 6;
+
+        // Ensure echo_str doesn't exceed buffer limits
+        if (strlen(echo_str) >= BUFFER_SIZE - 100) {
+            printf("Error: String too large to handle safely\n");
+            close(client_fd);
+            close(server_fd);
+            return 1;
+        }
+
+        char response[BUFFER_SIZE];
+        memset(response, 0, sizeof(response)); // Clear buffer before writing
+
+        int content_length = strlen(echo_str);
+
+        // snprintf formats a string and stores the result in a buffer,
+        // ensuring that the buffer is not overflowed.
+        int response_length = snprintf(response, sizeof(response),
+                                       "HTTP/1.1 200 OK\r\n"
+                                       "Content-Type: text/plain\r\n"
+                                       "Content-Length: %d\r\n"
+                                       "\r\n"
+                                       "%s",
+                                       content_length, echo_str);
+
+        send(client_fd, response, response_length, 0);
     } else {
-        response = "HTTP/1.1 404 Not Found\r\n"
-                   "Content-Type: text/plain\r\n"
-                   "Content-Length: 15\r\n"
-                   "\r\n"
-                   "Page not found\n";
+        const char *response = "HTTP/1.1 404 Not Found\r\n"
+                               "Content-Type: text/plain\r\n"
+                               "Content-Length: 15\r\n"
+                               "\r\n"
+                               "Page not found\n";
+        send(client_fd, response, strlen(response), 0);
     }
 
-    send(client_fd, response, strlen(response), 0);
-
-    close(client_fd);
+    shutdown(client_fd, SHUT_WR); 
     close(server_fd);
 
     return 0;
