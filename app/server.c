@@ -124,7 +124,7 @@ int main() {
     } else {
         const char *response = "HTTP/1.1 404 Not Found\r\n"
                                "Content-Type: text/plain\r\n"
-                               "Content-Length: 15\r\n"
+                               "Content-Length: 14\r\n"
                                "\r\n"
                                "Page not found";
         send(client_fd, response, strlen(response), 0);
