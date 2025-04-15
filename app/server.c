@@ -93,12 +93,40 @@ int main() {
                  "%s",
                  content_length, echo_str);
         send(client_fd, response, strlen(response), 0);
+    } else if (strcmp(path, "/user-agent") == 0) {
+        // Extract User-Agent header from the request
+        char user_agent[BUFFER_SIZE] = {0};
+        char *user_agent_line = strstr(buffer, "User-Agent: ");
+
+        if (user_agent_line) {
+            // Skip "User-Agent: " prefix (12 characters)
+            user_agent_line += 12;
+
+            // Find the end of the line
+            char *end_of_line = strstr(user_agent_line, "\r\n");
+            if (end_of_line) {
+                // Calculate the length of the User-Agent value
+                size_t user_agent_len = end_of_line - user_agent_line;
+                strncpy(user_agent, user_agent_line, user_agent_len);
+                user_agent[user_agent_len] = '\0';
+            }
+        }
+
+        int content_length = strlen(user_agent);
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: %d\r\n"
+                 "\r\n"
+                 "%s",
+                 content_length, user_agent);
+        send(client_fd, response, strlen(response), 0);
     } else {
         const char *response = "HTTP/1.1 404 Not Found\r\n"
                                "Content-Type: text/plain\r\n"
                                "Content-Length: 15\r\n"
                                "\r\n"
-                               "Page not found\n";
+                               "Page not found";
         send(client_fd, response, strlen(response), 0);
     }
 
