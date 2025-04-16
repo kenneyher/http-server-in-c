@@ -51,86 +51,94 @@ int main() {
     printf("Waiting for a client to connect...\n");
     client_addr_len = sizeof(client_addr);
 
-    int client_fd =
-        accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-    if (client_fd < 0) {
-        printf("Accept failed: %s\n", strerror(errno));
-        return 1;
-    }
-    printf("Client connected\n");
-
-    char buffer[BUFFER_SIZE] = {0};
-    ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_received <= 0) {
-        printf("Failed to receive request\n");
-        close(client_fd);
-    }
-
-    buffer[bytes_received] = '\0';
-
-    char method[BUFFER_SIZE], path[BUFFER_SIZE], protocol[BUFFER_SIZE];
-    sscanf(buffer, "%s %s %s", method, path, protocol);
-    path[BUFFER_SIZE - 1] = '\0';
-    printf("Request path: %s\n", path);
-
-    char response[BUFFER_SIZE];
-    if (strcmp(path, "/") == 0) {
-        snprintf(response, sizeof(response),
-                 "HTTP/1.1 200 OK\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: 2\r\n"
-                 "\r\n"
-                 "OK");
-        send(client_fd, response, strlen(response), 0);
-    } else if (strncmp(path, "/echo/", 6) == 0) {
-        const char *echo_str = path + 6;
-        int content_length = strlen(echo_str);
-        snprintf(response, sizeof(response),
-                 "HTTP/1.1 200 OK\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: %d\r\n"
-                 "\r\n"
-                 "%s",
-                 content_length, echo_str);
-        send(client_fd, response, strlen(response), 0);
-    } else if (strcmp(path, "/user-agent") == 0) {
-        // Extract User-Agent header from the request
-        char user_agent[BUFFER_SIZE] = {0};
-        char *user_agent_line = strstr(buffer, "User-Agent: ");
-
-        if (user_agent_line) {
-            // Skip "User-Agent: " prefix (12 characters)
-            user_agent_line += 12;
-
-            // Find the end of the line
-            char *end_of_line = strstr(user_agent_line, "\r\n");
-            if (end_of_line) {
-                // Calculate the length of the User-Agent value
-                size_t user_agent_len = end_of_line - user_agent_line;
-                strncpy(user_agent, user_agent_line, user_agent_len);
-                user_agent[user_agent_len] = '\0';
-            }
+    while (1) {
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr,
+                               &client_addr_len);
+        if (client_fd < 0) {
+            printf("Accept failed: %s\n", strerror(errno));
+            continue;
         }
 
-        int content_length = strlen(user_agent);
-        snprintf(response, sizeof(response),
-                 "HTTP/1.1 200 OK\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: %d\r\n"
-                 "\r\n"
-                 "%s",
-                 content_length, user_agent);
-        send(client_fd, response, strlen(response), 0);
-    } else {
-        const char *response = "HTTP/1.1 404 Not Found\r\n"
-                               "Content-Type: text/plain\r\n"
-                               "Content-Length: 14\r\n"
-                               "\r\n"
-                               "Page not found";
-        send(client_fd, response, strlen(response), 0);
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child process
+            close(server_fd); // child doesn't need the listening socket
+
+            char buffer[BUFFER_SIZE] = {0};
+            ssize_t bytes_received =
+                recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+            if (bytes_received <= 0) {
+                close(client_fd);
+                exit(1);
+            }
+
+            buffer[bytes_received] = '\0';
+
+            char method[BUFFER_SIZE], path[BUFFER_SIZE], protocol[BUFFER_SIZE];
+            sscanf(buffer, "%s %s %s", method, path, protocol);
+            path[BUFFER_SIZE - 1] = '\0';
+
+            char response[BUFFER_SIZE];
+            if (strcmp(path, "/") == 0) {
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: text/plain\r\n"
+                         "Content-Length: 2\r\n"
+                         "\r\n"
+                         "OK");
+                send(client_fd, response, strlen(response), 0);
+            } else if (strncmp(path, "/echo/", 6) == 0) {
+                const char *echo_str = path + 6;
+                int content_length = strlen(echo_str);
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: text/plain\r\n"
+                         "Content-Length: %d\r\n"
+                         "\r\n"
+                         "%s",
+                         content_length, echo_str);
+                send(client_fd, response, strlen(response), 0);
+            } else if (strcmp(path, "/user-agent") == 0) {
+                char user_agent[BUFFER_SIZE] = {0};
+                char *user_agent_line = strstr(buffer, "User-Agent: ");
+                if (user_agent_line) {
+                    user_agent_line += 12;
+                    char *end_of_line = strstr(user_agent_line, "\r\n");
+                    if (end_of_line) {
+                        size_t user_agent_len = end_of_line - user_agent_line;
+                        strncpy(user_agent, user_agent_line, user_agent_len);
+                        user_agent[user_agent_len] = '\0';
+                    }
+                }
+
+                int content_length = strlen(user_agent);
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: text/plain\r\n"
+                         "Content-Length: %d\r\n"
+                         "\r\n"
+                         "%s",
+                         content_length, user_agent);
+                send(client_fd, response, strlen(response), 0);
+            } else {
+                const char *not_found_response = "HTTP/1.1 404 Not Found\r\n"
+                                                 "Content-Type: text/plain\r\n"
+                                                 "Content-Length: 14\r\n"
+                                                 "\r\n"
+                                                 "Page not found";
+                send(client_fd, not_found_response, strlen(not_found_response),
+                     0);
+            }
+
+            shutdown(client_fd, SHUT_WR);
+            close(client_fd);
+            exit(0); // Important to exit child process
+        } else {
+            // Parent process
+            close(client_fd); // parent closes client socket; child handles it
+        }
     }
 
-    shutdown(client_fd, SHUT_WR);
     close(server_fd);
 
     return 0;
