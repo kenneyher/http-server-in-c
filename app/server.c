@@ -9,9 +9,22 @@
 
 #define BUFFER_SIZE 1024
 
-int main() {
+int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
+
+    char *directory = NULL;
+
+    for (int i = 1; i < argc - 1; i++) {
+        if (argc > 1 && strcmp(argv[i], "--directory") == 0) {
+            directory = argv[i + 1];
+            break;
+        }
+    }
+    if (!directory) {
+        fprintf(stderr, "--directory flag is required\n");
+        return 1;
+    }
 
     int server_fd;
     socklen_t client_addr_len;
@@ -120,6 +133,35 @@ int main() {
                          "%s",
                          content_length, user_agent);
                 send(client_fd, response, strlen(response), 0);
+            } else if (strncmp(path, "/files/", 7) == 0) {
+                const char *filename = path + 7;
+                char filepath[BUFFER_SIZE];
+                snprintf(filepath, sizeof(filepath), "%s/%s", directory,
+                         filename);
+
+                FILE *file = fopen(filepath, "rb");
+                if (!file) {
+                    const char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+                    send(client_fd, not_found, strlen(not_found), 0);
+                } else {
+                    fseek(file, 0, SEEK_END);
+                    long filesize = ftell(file);
+                    rewind(file);
+
+                    char *file_content = malloc(filesize);
+                    fread(file_content, 1, filesize, file);
+                    fclose(file);
+
+                    snprintf(response, sizeof(response),
+                             "HTTP/1.1 200 OK\r\n"
+                             "Content-Type: application/octet-stream\r\n"
+                             "Content-Length: %ld\r\n"
+                             "\r\n",
+                             filesize);
+                    send(client_fd, response, strlen(response), 0);
+                    send(client_fd, file_content, filesize, 0);
+                    free(file_content);
+                }
             } else {
                 const char *not_found_response = "HTTP/1.1 404 Not Found\r\n"
                                                  "Content-Type: text/plain\r\n"
