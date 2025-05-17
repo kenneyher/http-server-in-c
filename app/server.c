@@ -136,31 +136,82 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(path, "/files/", 7) == 0) {
                 const char *filename = path + 7;
                 char filepath[BUFFER_SIZE];
+                // sets the filepath to the directory and the filename
                 snprintf(filepath, sizeof(filepath), "%s/%s", directory,
-                         filename);
+                filename);
 
-                FILE *file = fopen(filepath, "rb");
-                if (!file) {
-                    const char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
-                    send(client_fd, not_found, strlen(not_found), 0);
-                } else {
-                    fseek(file, 0, SEEK_END);
-                    long filesize = ftell(file);
-                    rewind(file);
+                if (strcmp(method, "POST") == 0) {
+                    // Get the length of the content in the request
+                    char *cl_start = strstr(buffer, "Content-Length: ");
+                    int content_length = 0;
+                    if (cl_start) {
+                        sscanf(cl_start, "Content-Length: %d", &content_length);
+                    }
 
-                    char *file_content = malloc(filesize);
-                    fread(file_content, 1, filesize, file);
-                    fclose(file);
+                    // Find the start of the body
+                    char *body = strstr(buffer, "\r\n\r\n");
+                    if (body) {
+                        body += 4; // skip past "\r\n\r\n"
+                    }
 
-                    snprintf(response, sizeof(response),
-                             "HTTP/1.1 200 OK\r\n"
-                             "Content-Type: application/octet-stream\r\n"
-                             "Content-Length: %ld\r\n"
-                             "\r\n",
-                             filesize);
-                    send(client_fd, response, strlen(response), 0);
-                    send(client_fd, file_content, filesize, 0);
-                    free(file_content);
+                    int bytes_in_buffer = bytes_received - (body - buffer);
+                    char *request_body = malloc(content_length);
+                    memcpy(request_body, body, bytes_in_buffer);
+
+                    int bytes_remaining = content_length - bytes_in_buffer;
+                    int offset = bytes_in_buffer;
+
+                    // read the rest of the body
+                    while (bytes_remaining > 0) {
+                        ssize_t n = recv(client_fd, request_body + offset,
+                                         bytes_remaining, 0);
+                        if (n <= 0)
+                            break;
+                        offset += n;
+                        bytes_remaining -= n;
+                    }
+
+                    FILE *f = fopen(filepath, "wb");
+                    if (f) {
+                        fwrite(request_body, 1, content_length, f);
+                        fclose(f);
+
+                        const char *created_response =
+                            "HTTP/1.1 201 Created\r\n\r\n";
+                        send(client_fd, created_response,
+                             strlen(created_response), 0);
+                    } else {
+                        const char *server_error =
+                            "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+                        send(client_fd, server_error, strlen(server_error), 0);
+                    }
+
+                    free(request_body);
+                } else if (strcmp(method, "GET") == 0) {
+                    FILE *file = fopen(filepath, "rb");
+                    if (!file) {
+                        const char *not_found =
+                            "HTTP/1.1 404 Not Found\r\n\r\n";
+                        send(client_fd, not_found, strlen(not_found), 0);
+                    } else {
+                        fseek(file, 0, SEEK_END);
+                        long filesize = ftell(file);
+                        rewind(file);
+
+                        char *file_content = malloc(filesize);
+                        fread(file_content, 1, filesize, file);
+                        fclose(file);
+
+                        snprintf(response, sizeof(response),
+                                 "HTTP/1.1 200 OK\r\n"
+                                 "Content-Type: application/octet-stream\r\n"
+                                 "Content-Length: %ld\r\n"
+                                 "\r\n",
+                                 filesize);
+                        send(client_fd, response, strlen(response), 0);
+                        send(client_fd, file_content, filesize, 0);
+                        free(file_content);
+                    }
                 }
             } else {
                 const char *not_found_response = "HTTP/1.1 404 Not Found\r\n"
